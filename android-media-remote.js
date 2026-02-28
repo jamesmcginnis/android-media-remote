@@ -364,11 +364,12 @@ class AndroidMediaRemote extends HTMLElement {
         .r-power-btn.r-power-on:active,
         .r-power-btn.r-power-on.pressed { background: rgba(234,67,53,0.27) !important; }
 
-        /* Mic (Assistant) — Google Blue tint */
-        .r-assistant-btn { background: rgba(66,133,244,0.12); border-color: rgba(66,133,244,0.25) !important; }
-        .r-assistant-btn svg { fill: #4285F4; }
+        /* Mic (Assistant) — icon has a subtle blue hint but NO background tint by default */
+        .r-assistant-btn svg { fill: rgba(130,170,255,0.75); }
         .r-assistant-btn:active,
-        .r-assistant-btn.pressed { background: rgba(66,133,244,0.24) !important; }
+        .r-assistant-btn.pressed { background: rgba(66,133,244,0.22) !important; }
+        .r-assistant-btn:active svg,
+        .r-assistant-btn.pressed svg { fill: #4285F4; }
 
         /* Apps — open state */
         .r-apps-btn.r-apps-open { background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.26) !important; }
@@ -461,15 +462,27 @@ class AndroidMediaRemote extends HTMLElement {
 
         /* ─── Material Design 3 media controls ──────────────────
          *
+         * .controls  — buttons only row, centred with natural gap.
+         *              No volume here — that sits on .vol-row below.
+         * .vol-row   — separate row: [icon] [slider]
+         *
          * FAB: filled blue circle — Play/Pause
          * Outlined circles: Prev / Next
          * Ghost circles: Shuffle / Repeat (tonal when active)
-         * Compact only: MiniRemote (left) + Mute toggle (right)
+         * Compact only: MiniRemote (left) + Mute (right)
          */
         .controls {
-          display: flex; justify-content: space-between; align-items: center;
-          margin: 14px 0 0; padding: 0 4px;
+          display: flex; justify-content: center; align-items: center;
+          gap: 12px;
+          margin: 16px 0 0; padding: 0;
         }
+
+        /* Volume on its own row — never competes with playback buttons */
+        .vol-row {
+          display: flex; align-items: center; gap: 10px;
+          width: 100%; margin-top: 14px;
+        }
+        .vol-row-icon { width: 16px; height: 16px; fill: rgba(255,255,255,0.35); flex-shrink: 0; }
 
         /* FAB */
         .md-fab {
@@ -542,7 +555,7 @@ class AndroidMediaRemote extends HTMLElement {
         .compact-mute-btn.muted { background: rgba(234,67,53,0.10); }
 
         /* Volume */
-        .vol-section { display: contents; }
+        .vol-section { display: none; } /* vol-row handles this now */
         .vol-icon    { display: none; width: 18px; height: 18px; fill: rgba(255,255,255,0.5); cursor: pointer; }
         .vol-btn {
           display: none; cursor: pointer; align-items: center; justify-content: center;
@@ -552,10 +565,19 @@ class AndroidMediaRemote extends HTMLElement {
         .vol-btn svg { width: 22px; height: 22px; fill: rgba(255,255,255,0.5); }
         .vol-btn:active, .vol-btn.pressed { transform: scale(0.92); background: rgba(255,255,255,0.1); }
         .vol-btn:active svg, .vol-btn.pressed svg { fill: #fff; filter: drop-shadow(0 0 6px rgba(255,255,255,0.7)); }
-        .volume-slider { width: 100%; height: 4px; accent-color: var(--vol-accent); margin-top: 10px; cursor: pointer; }
+        .volume-slider {
+          flex: 1; height: 4px; accent-color: var(--vol-accent);
+          cursor: pointer; -webkit-appearance: none; appearance: none;
+          background: rgba(255,255,255,0.12); border-radius: 2px;
+        }
+        .volume-slider::-webkit-slider-thumb {
+          -webkit-appearance: none; width: 14px; height: 14px;
+          border-radius: 50%; background: var(--vol-accent); cursor: pointer;
+        }
 
-        .vol-btn-mode .vol-btn     { display: flex; }
-        .vol-btn-mode .vol-section { display: none; }
+        /* vol-btn-mode: hide slider row, show +/− buttons in controls */
+        .vol-btn-mode .vol-btn { display: flex; }
+        .vol-btn-mode .vol-row { display: none; }
 
         .selector {
           width: 100%; padding: 9px 10px;
@@ -580,17 +602,17 @@ class AndroidMediaRemote extends HTMLElement {
         .mode-compact .track-info     { padding-right: 40px; }
         .mode-compact .track-title    { font-size: 14px; }
         .mode-compact .track-artist   { font-size: 12px; margin-bottom: 0; }
-        .mode-compact .controls       { margin: 6px 0 0; padding: 0; }
-        .mode-compact .md-fab         { width: 48px; height: 48px; }
-        .mode-compact .md-fab svg     { width: 24px; height: 24px; }
-        .mode-compact .md-nav-btn     { width: 38px; height: 38px; }
-        .mode-compact .md-nav-btn svg { width: 20px; height: 20px; }
-        .mode-compact .md-icon-btn        { display: none; }
-        .mode-compact .mini-remote-btn    { display: flex; }
-        .mode-compact .compact-mute-btn   { display: flex; }
-        .mode-compact .vol-section   { display: flex; align-items: center; gap: 6px; width: 100%; padding: 4px 0; min-width: 0; }
-        .mode-compact .volume-slider { margin-top: 0; flex: 1; min-width: 0; }
-        .mode-compact .progress-bar  { margin-top: 8px; }
+        .mode-compact .controls       { margin: 8px 0 0; gap: 8px; }
+        .mode-compact .md-fab         { width: 44px; height: 44px; }
+        .mode-compact .md-fab svg     { width: 22px; height: 22px; }
+        .mode-compact .md-nav-btn     { width: 36px; height: 36px; }
+        .mode-compact .md-nav-btn svg { width: 19px; height: 19px; }
+        .mode-compact .md-icon-btn         { display: none; }
+        .mode-compact .mini-remote-btn     { display: flex; }
+        .mode-compact .compact-mute-btn    { display: flex; }
+        /* Compact vol row: tighter spacing */
+        .mode-compact .vol-row        { margin-top: 8px; gap: 8px; }
+        .mode-compact .progress-bar   { margin-top: 8px; }
         .mode-compact .selector,
         .mode-compact .progress-times { display: none; }
 
@@ -706,11 +728,17 @@ class AndroidMediaRemote extends HTMLElement {
             <button class="compact-mute-btn" id="btnMute">
               <svg viewBox="0 0 24 24" id="muteIcon"><path d="M3,9V15H7L12,20V4L7,9H3M18.5,12C18.5,10.23 17.48,8.71 16,7.97V16C17.48,15.29 18.5,13.77 18.5,12Z"/></svg>
             </button>
-            <!-- Volume slider -->
-            <div class="vol-section">
-              <svg class="vol-icon" viewBox="0 0 24 24"></svg>
-              <input type="range" class="volume-slider" id="vSlider" min="0" max="100">
-            </div>
+          </div>
+
+          <!-- Volume row — sits below the playback controls, never squashes them -->
+          <div class="vol-row">
+            <svg class="vol-row-icon" viewBox="0 0 24 24"><path d="M3,9V15H7L12,20V4L7,9H3M18.5,12C18.5,10.23 17.48,8.71 16,7.97V16C17.48,15.29 18.5,13.77 18.5,12Z"/></svg>
+            <input type="range" class="volume-slider" id="vSlider" min="0" max="100">
+          </div>
+
+          <!-- Legacy vol-section kept for vol-btn-mode wiring (hidden by default) -->
+          <div class="vol-section" style="display:none;">
+            <svg class="vol-icon" viewBox="0 0 24 24"></svg>
           </div>
 
           <select class="selector" id="eSelector"></select>
