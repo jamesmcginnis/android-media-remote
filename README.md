@@ -4,8 +4,6 @@ VERY MUCH A WORK IN PROGRESS!!
 
 A custom Home Assistant Lovelace card providing a Material Design Android TV media remote and player interface. Control your Android TV with a beautiful, responsive card that integrates seamlessly with your Home Assistant dashboard.
 
-[![GitHub Release][releases-shield]][releases]
-[![License][license-shield]](LICENSE)
 [![hacs][hacs-shield]][hacs]
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jamesmcginnis&repository=android-media-remote&category=plugin)
