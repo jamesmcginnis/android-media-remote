@@ -538,21 +538,21 @@ class AndroidMediaRemote extends HTMLElement {
         .mini-remote-btn:active,
         .mini-remote-btn.pressed { background: rgba(255,255,255,0.16); transform: scale(0.92); }
 
-        /* Compact mute button — far-right of controls, compact only */
+        /* Compact mute button — matches md-nav-btn: outlined circle, bright icon */
         .compact-mute-btn {
-          display: none; width: 34px; height: 34px;
-          border-radius: 50% !important; border: none !important;
-          background: transparent; cursor: pointer;
-          align-items: center; justify-content: center;
+          display: none; width: 36px; height: 36px;
+          border-radius: 50% !important;
+          background: rgba(255,255,255,0.06);
+          border: 1px solid rgba(255,255,255,0.10) !important;
+          cursor: pointer; align-items: center; justify-content: center;
           flex-shrink: 0; transition: all 0.18s ease;
           position: relative; overflow: hidden;
         }
-        .compact-mute-btn svg { width: 18px; height: 18px; fill: rgba(255,255,255,0.38); transition: fill 0.18s ease; }
-        .compact-mute-btn::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: rgba(255,255,255,0); transition: background 0.18s ease; }
-        .compact-mute-btn:active::after,
-        .compact-mute-btn.pressed::after { background: rgba(255,255,255,0.12); }
-        .compact-mute-btn.muted svg { fill: rgba(234,67,53,0.9); }
-        .compact-mute-btn.muted { background: rgba(234,67,53,0.10); }
+        .compact-mute-btn svg { width: 19px; height: 19px; fill: rgba(255,255,255,0.82); transition: fill 0.18s ease; }
+        .compact-mute-btn:active, .compact-mute-btn.pressed { background: rgba(255,255,255,0.14); transform: scale(0.93); }
+        /* Muted state: red tint to signal active mute */
+        .compact-mute-btn.muted { background: rgba(234,67,53,0.15); border-color: rgba(234,67,53,0.30) !important; }
+        .compact-mute-btn.muted svg { fill: rgba(239,83,80,0.9); }
 
         /* Volume */
         .vol-section { display: none; } /* vol-row handles this now */
