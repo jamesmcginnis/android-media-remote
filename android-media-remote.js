@@ -34,7 +34,8 @@ class AndroidMediaRemote extends HTMLElement {
       show_entity_selector: true,
       volume_control: 'slider',
       startup_mode: 'compact',
-      volume_entity: ''
+      volume_entity: '',
+      remote_entity: ''
     };
   }
 
@@ -51,6 +52,7 @@ class AndroidMediaRemote extends HTMLElement {
       volume_control: 'slider',
       startup_mode: 'compact',
       volume_entity: '',
+      remote_entity: '',
       ...config
     };
     if (!this._entity) this._entity = this._config.entities[0];
@@ -179,26 +181,198 @@ class AndroidMediaRemote extends HTMLElement {
     return (ve && ve.trim()) ? ve.trim() : this._entity;
   }
 
-  sendRemoteCommand(command) {
-    const remoteId = this._entity.replace('media_player.', 'remote.');
-    this._hass.callService('remote', 'send_command', {
-      entity_id: remoteId, command
-    }).catch(() => {
-      this._hass.callService('androidtv', 'adb_command', {
-        entity_id: this._entity, command: this._mapToAdb(command)
-      }).catch(() => {});
-    });
+  /* ── Android TV command dispatch ─────────────────────────────
+   *
+   * Three-tier fallback chain:
+   *
+   *  1. androidtv_remote  (HA 2023.5+) — remote.send_command with
+   *     KEYCODE_* names.  Needs the "Android TV Remote" integration.
+   *     Most reliable; works over IP, no ADB required.
+   *
+   *  2. androidtv / Fire TV  (legacy)  — androidtv.adb_command with
+   *     "input keyevent N" syntax.  Needs ADB debug enabled on the TV.
+   *
+   *  3. media_player fallback — for actions HA can handle natively
+   *     (play/pause, seek, source select) even without a remote entity.
+   *
+   * Auto-detection: if a remote.* entity exists for this media_player
+   * we assume androidtv_remote and send KEYCODE_* names.  Otherwise
+   * we fall through to ADB.  Users can override with remote_entity config.
+   */
+
+  get _remoteEntityId() {
+    if (this._config?.remote_entity?.trim()) return this._config.remote_entity.trim();
+    return this._entity?.replace('media_player.', 'remote.') || null;
   }
 
-  _mapToAdb(command) {
-    const map = {
-      up: 'input keyevent 19', down: 'input keyevent 20',
-      left: 'input keyevent 21', right: 'input keyevent 22',
-      select: 'input keyevent 23', back: 'input keyevent 4',
-      home: 'input keyevent 3', menu: 'input keyevent 82',
-      assistant: 'input keyevent 225', search: 'input keyevent 84',
+  /* Canonical command → KEYCODE_* name (for androidtv_remote / remote.send_command) */
+  static get _keycodeNames() {
+    return {
+      // Navigation
+      up:           'KEYCODE_DPAD_UP',
+      down:         'KEYCODE_DPAD_DOWN',
+      left:         'KEYCODE_DPAD_LEFT',
+      right:        'KEYCODE_DPAD_RIGHT',
+      select:       'KEYCODE_DPAD_CENTER',
+      back:         'KEYCODE_BACK',
+      home:         'KEYCODE_HOME',
+      menu:         'KEYCODE_MENU',
+      // System
+      power:        'KEYCODE_POWER',
+      wake:         'KEYCODE_WAKEUP',
+      sleep:        'KEYCODE_SLEEP',
+      settings:     'KEYCODE_SETTINGS',
+      // Google Assistant / search
+      assistant:    'KEYCODE_ASSIST',
+      search:       'KEYCODE_SEARCH',
+      // Volume
+      volume_up:    'KEYCODE_VOLUME_UP',
+      volume_down:  'KEYCODE_VOLUME_DOWN',
+      mute:         'KEYCODE_VOLUME_MUTE',
+      // Media transport
+      play:         'KEYCODE_MEDIA_PLAY',
+      pause:        'KEYCODE_MEDIA_PAUSE',
+      play_pause:   'KEYCODE_MEDIA_PLAY_PAUSE',
+      stop:         'KEYCODE_MEDIA_STOP',
+      next:         'KEYCODE_MEDIA_NEXT',
+      prev:         'KEYCODE_MEDIA_PREVIOUS',
+      rewind:       'KEYCODE_MEDIA_REWIND',
+      fast_forward: 'KEYCODE_MEDIA_FAST_FORWARD',
+      // Input / display
+      hdmi_1:       'KEYCODE_TV_INPUT_HDMI_1',
+      hdmi_2:       'KEYCODE_TV_INPUT_HDMI_2',
+      hdmi_3:       'KEYCODE_TV_INPUT_HDMI_3',
+      hdmi_4:       'KEYCODE_TV_INPUT_HDMI_4',
+      input:        'KEYCODE_TV_INPUT',
+      // Shortcuts
+      youtube:      'KEYCODE_STEM_1',
+      netflix:      'KEYCODE_STEM_2',
     };
-    return map[command] || command;
+  }
+
+  /* Canonical command → ADB keyevent number (for legacy androidtv integration) */
+  static get _adbKeycodes() {
+    return {
+      up: 19, down: 20, left: 21, right: 22, select: 23,
+      back: 4, home: 3, menu: 82,
+      power: 26, wake: 224, sleep: 223, settings: 176,
+      assistant: 225, search: 84,
+      volume_up: 24, volume_down: 25, mute: 164,
+      play: 126, pause: 127, play_pause: 85, stop: 86,
+      next: 87, prev: 88, rewind: 89, fast_forward: 90,
+      hdmi_1: 243, hdmi_2: 244, hdmi_3: 245, hdmi_4: 246,
+      input: 178,
+    };
+  }
+
+  /* Main entry point for all remote key presses */
+  _sendCommand(command) {
+    const remId    = this._remoteEntityId;
+    const hasRem   = remId && !!this._hass.states[remId];
+    const keycode  = AndroidMediaRemote._keycodeNames[command];
+    const adbCode  = AndroidMediaRemote._adbKeycodes[command];
+
+    if (hasRem && keycode) {
+      /* Tier 1: androidtv_remote — preferred */
+      this._hass.callService('remote', 'send_command', {
+        entity_id: remId, command: keycode
+      }).catch(() => {
+        /* Tier 2: ADB fallback */
+        if (adbCode !== undefined) {
+          this._hass.callService('androidtv', 'adb_command', {
+            entity_id: this._entity, command: `input keyevent ${adbCode}`
+          }).catch(() => {});
+        }
+      });
+    } else if (adbCode !== undefined) {
+      /* Tier 2 direct: no remote entity, try ADB */
+      this._hass.callService('androidtv', 'adb_command', {
+        entity_id: this._entity, command: `input keyevent ${adbCode}`
+      }).catch(() => {});
+    }
+    /* Tier 3 handled by callers for media_player services */
+  }
+
+  /* Volume via remote keycodes — for androidtv_remote and ADB */
+  _sendVolumeCommand(direction) {
+    const cmd    = direction > 0 ? 'volume_up' : 'volume_down';
+    const remId  = this._remoteEntityId;
+    const hasRem = remId && !!this._hass.states[remId];
+    const volEnt = this._volEntity;
+
+    if (hasRem) {
+      /* Remote keycode first — works for both androidtv_remote and ADB-via-remote */
+      const keycode = AndroidMediaRemote._keycodeNames[cmd];
+      this._hass.callService('remote', 'send_command', {
+        entity_id: remId, command: keycode
+      }).catch(() => {
+        /* ADB fallback */
+        const adbCode = AndroidMediaRemote._adbKeycodes[cmd];
+        this._hass.callService('androidtv', 'adb_command', {
+          entity_id: this._entity, command: `input keyevent ${adbCode}`
+        }).catch(() => {
+          /* media_player last resort */
+          const current = this._hass.states[volEnt]?.attributes?.volume_level || 0;
+          this._hass.callService('media_player', 'volume_set', {
+            entity_id: volEnt, volume_level: Math.min(1, Math.max(0, current + direction * 0.05))
+          });
+        });
+      });
+    } else {
+      /* No remote entity — media_player.volume_set */
+      const current = this._hass.states[volEnt]?.attributes?.volume_level || 0;
+      this._hass.callService('media_player', 'volume_set', {
+        entity_id: volEnt, volume_level: Math.min(1, Math.max(0, current + direction * 0.05))
+      });
+    }
+  }
+
+  /* Mute via KEYCODE_VOLUME_MUTE → ADB → media_player.volume_mute */
+  _sendMuteCommand() {
+    const remId  = this._remoteEntityId;
+    const hasRem = remId && !!this._hass.states[remId];
+    if (hasRem) {
+      this._hass.callService('remote', 'send_command', {
+        entity_id: remId, command: 'KEYCODE_VOLUME_MUTE'
+      }).catch(() => {
+        this._hass.callService('androidtv', 'adb_command', {
+          entity_id: this._entity, command: 'input keyevent 164'
+        }).catch(() => {
+          const muted = this._hass.states[this._entity]?.attributes?.is_volume_muted;
+          this._hass.callService('media_player', 'volume_mute', {
+            entity_id: this._volEntity, is_volume_muted: !muted
+          });
+        });
+      });
+    } else {
+      const muted = this._hass.states[this._entity]?.attributes?.is_volume_muted;
+      this._hass.callService('media_player', 'volume_mute', {
+        entity_id: this._volEntity, is_volume_muted: !muted
+      });
+    }
+  }
+
+  /* Power — KEYCODE_POWER to toggle, KEYCODE_WAKEUP when off, media_player fallback */
+  _sendPowerCommand() {
+    const state  = this._hass.states[this._entity];
+    const isOff  = ['off','standby','unavailable'].includes(state?.state);
+    const remId  = this._remoteEntityId;
+    const hasRem = remId && !!this._hass.states[remId];
+
+    if (hasRem) {
+      const keycode = isOff ? 'KEYCODE_WAKEUP' : 'KEYCODE_POWER';
+      this._hass.callService('remote', 'send_command', {
+        entity_id: remId, command: keycode
+      }).catch(() => {
+        /* ADB fallback */
+        const adbCode = isOff ? 224 : 26;
+        this._hass.callService('androidtv', 'adb_command', {
+          entity_id: this._entity, command: `input keyevent ${adbCode}`
+        }).catch(() => this.call(isOff ? 'turn_on' : 'turn_off'));
+      });
+    } else {
+      this.call(isOff ? 'turn_on' : 'turn_off');
+    }
   }
 
   call(svc, data = {}) {
@@ -802,32 +976,12 @@ class AndroidMediaRemote extends HTMLElement {
     ['btnPlay','btnPrev','btnNext','btnShuffle','btnRepeat'].forEach(id => addPress(r.getElementById(id)));
 
     /* Compact mute */
-    r.getElementById('btnMute').onclick = () => {
-      const muted = this._hass.states[this._entity]?.attributes?.is_volume_muted;
-      this._hass.callService('media_player', 'volume_mute', {
-        entity_id: this._volEntity, is_volume_muted: !muted
-      });
-    };
+    r.getElementById('btnMute').onclick = () => this._sendMuteCommand();
     addPress(r.getElementById('btnMute'));
 
     /* Volume buttons */
-    const sendVolCmd = (dir) => {
-      const volEnt = this._volEntity;
-      const remId  = (volEnt === this._entity) ? this._entity.replace('media_player.', 'remote.') : null;
-      const hasRem = remId && !!this._hass.states[remId];
-      if (hasRem) {
-        this._hass.callService('remote', 'send_command', {
-          entity_id: remId, command: dir > 0 ? 'volume_up' : 'volume_down'
-        }).catch(() => {});
-      } else {
-        const current = this._hass.states[volEnt]?.attributes?.volume_level || 0;
-        this._hass.callService('media_player', 'volume_set', {
-          entity_id: volEnt, volume_level: Math.min(1, Math.max(0, current + dir * 0.05))
-        });
-      }
-    };
-    r.getElementById('btnVolUp').onclick   = () => sendVolCmd(1);
-    r.getElementById('btnVolDown').onclick = () => sendVolCmd(-1);
+    r.getElementById('btnVolUp').onclick   = () => this._sendVolumeCommand(1);
+    r.getElementById('btnVolDown').onclick = () => this._sendVolumeCommand(-1);
     addPress(r.getElementById('btnVolUp'));
     addPress(r.getElementById('btnVolDown'));
 
@@ -835,28 +989,42 @@ class AndroidMediaRemote extends HTMLElement {
     r.getElementById('vSlider').oninput = (e) => {
       const newLevel = parseFloat(e.target.value) / 100;
       const volEnt   = this._volEntity;
-      const remId    = (volEnt === this._entity) ? this._entity.replace('media_player.', 'remote.') : null;
+      const remId    = this._remoteEntityId;
       const hasRem   = remId && !!this._hass.states[remId];
+
       if (hasRem) {
+        /* Use KEYCODE_VOLUME_UP/DOWN — works for androidtv_remote and ADB */
         const prev  = this._lastVolume ?? (this._hass.states[this._entity]?.attributes?.volume_level ?? 0.5);
         const delta = newLevel - prev;
         if (Math.abs(delta) > 0.008) {
-          const cmd = delta > 0 ? 'volume_up' : 'volume_down';
+          const cmd     = delta > 0 ? 'volume_up' : 'volume_down';
+          const keycode = AndroidMediaRemote._keycodeNames[cmd];
+          const adbCode = AndroidMediaRemote._adbKeycodes[cmd];
           const now = Date.now();
+          const fire = () => {
+            this._hass.callService('remote', 'send_command', {
+              entity_id: remId, command: keycode
+            }).catch(() => {
+              this._hass.callService('androidtv', 'adb_command', {
+                entity_id: this._entity, command: `input keyevent ${adbCode}`
+              }).catch(() => {});
+            });
+          };
           if (!this._volLastFired || (now - this._volLastFired) >= 380) {
             if (this._volDebounce) { clearTimeout(this._volDebounce); this._volDebounce = null; }
-            this._hass.callService('remote', 'send_command', { entity_id: remId, command: cmd }).catch(() => {});
+            fire();
             this._volLastFired = now;
           } else {
             if (this._volDebounce) clearTimeout(this._volDebounce);
             this._volDebounce = setTimeout(() => {
-              this._hass.callService('remote', 'send_command', { entity_id: remId, command: cmd }).catch(() => {});
+              fire();
               this._volLastFired = Date.now();
             }, 380 - (now - this._volLastFired));
           }
           this._lastVolume = newLevel;
         }
       } else {
+        /* No remote entity — direct media_player.volume_set */
         this._hass.callService('media_player', 'volume_set', { entity_id: volEnt, volume_level: newLevel });
         this._lastVolume = newLevel;
       }
@@ -882,19 +1050,15 @@ class AndroidMediaRemote extends HTMLElement {
       el.onclick = (e) => { e.stopPropagation(); fn(); };
       addPress(el);
     };
-    rCmd('rBack',      () => this.sendRemoteCommand('back'));
-    rCmd('rHome',      () => this.sendRemoteCommand('home'));
-    rCmd('rAssistant', () => this.sendRemoteCommand('assistant'));
-    rCmd('rUp',        () => this.sendRemoteCommand('up'));
-    rCmd('rDown',      () => this.sendRemoteCommand('down'));
-    rCmd('rLeft',      () => this.sendRemoteCommand('left'));
-    rCmd('rRight',     () => this.sendRemoteCommand('right'));
-    rCmd('rSelect',    () => this.sendRemoteCommand('select'));
-    rCmd('rPower',     () => {
-      const state = this._hass.states[this._entity];
-      const isOff = ['off','standby','unavailable'].includes(state?.state);
-      this.call(isOff ? 'turn_on' : 'turn_off');
-    });
+    rCmd('rBack',      () => this._sendCommand('back'));
+    rCmd('rHome',      () => this._sendCommand('home'));
+    rCmd('rAssistant', () => this._sendCommand('assistant'));
+    rCmd('rUp',        () => this._sendCommand('up'));
+    rCmd('rDown',      () => this._sendCommand('down'));
+    rCmd('rLeft',      () => this._sendCommand('left'));
+    rCmd('rRight',     () => this._sendCommand('right'));
+    rCmd('rSelect',    () => this._sendCommand('select'));
+    rCmd('rPower',     () => this._sendPowerCommand());
 
     /* Apps dropdown */
     const rAppsBtn      = r.getElementById('rApps');
@@ -1066,6 +1230,7 @@ class AndroidMediaRemoteEditor extends HTMLElement {
     chk('volume_control_btn',   this._config.volume_control === 'buttons');
     set('startup_mode',         this._config.startup_mode  || 'compact');
     set('volume_entity',        this._config.volume_entity || '');
+    set('remote_entity',        this._config.remote_entity || '');
   }
 
   render() {
@@ -1123,6 +1288,20 @@ class AndroidMediaRemoteEditor extends HTMLElement {
               return `<option value="${e}">${name}</option>`;
             }).join('')}
           </select>
+        </div>
+        <div class="row">
+          <label>Remote Entity <span style="font-weight:normal;font-size:12px;color:#888;">(optional — override auto-detected remote.* entity)</span></label>
+          <select id="remote_entity" style="background:var(--card-background-color);color:var(--primary-text-color);border:1px solid #444;border-radius:6px;padding:5px 8px;font-size:13px;cursor:pointer;width:100%;">
+            <option value="">— Auto-detect (remote.&lt;device_name&gt;) —</option>
+            ${Object.keys(this._hass.states).filter(e => e.startsWith('remote.')).sort().map(e => {
+              const name = this._hass.states[e]?.attributes?.friendly_name || e;
+              return `<option value="${e}">${name}</option>`;
+            }).join('')}
+          </select>
+          <span style="font-size:11px;color:#666;margin-top:2px;">
+            Use <strong>Android TV Remote</strong> integration (HA 2023.5+) for best results — no ADB needed.
+            If no remote.* entity exists, commands fall back to the legacy <strong>androidtv</strong> ADB integration.
+          </span>
         </div>
         <div class="row">
           <label>Manage &amp; Reorder Media Players</label>
@@ -1216,6 +1395,7 @@ class AndroidMediaRemoteEditor extends HTMLElement {
     root.getElementById('volume_control_btn').onchange    = (e) => this._updateConfig('volume_control',       e.target.checked ? 'buttons' : 'slider');
     root.getElementById('startup_mode').onchange          = (e) => this._updateConfig('startup_mode',         e.target.value);
     root.getElementById('volume_entity').onchange         = (e) => this._updateConfig('volume_entity',        e.target.value);
+    root.getElementById('remote_entity').onchange         = (e) => this._updateConfig('remote_entity',        e.target.value);
   }
 
   _updateConfig(key, value) {
