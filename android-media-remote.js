@@ -683,7 +683,7 @@ class AndroidMediaRemote extends HTMLElement {
           transition: all 0.18s cubic-bezier(0.4,0,0.2,1);
           position: relative; overflow: hidden; flex-shrink: 0;
         }
-        .md-fab svg { width: 34px; height: 34px; fill: #fff; }
+        .md-fab svg { width: 26px; height: 26px; fill: #fff; }
         .md-fab::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: rgba(255,255,255,0); transition: background 0.18s ease; }
         .md-fab:active::after,
         .md-fab.pressed::after { background: rgba(255,255,255,0.14); }
@@ -697,7 +697,7 @@ class AndroidMediaRemote extends HTMLElement {
           cursor: pointer; display: flex; align-items: center; justify-content: center;
           transition: all 0.18s ease; position: relative; overflow: hidden;
         }
-        .md-nav-btn svg { width: 28px; height: 28px; fill: rgba(255,255,255,0.82); }
+        .md-nav-btn svg { width: 22px; height: 22px; fill: rgba(255,255,255,0.82); }
         .md-nav-btn:active, .md-nav-btn.pressed { background: rgba(255,255,255,0.14); transform: scale(0.93); }
 
         /* Ghost icon buttons — Shuffle / Repeat — smaller, secondary */
@@ -708,7 +708,7 @@ class AndroidMediaRemote extends HTMLElement {
           cursor: pointer; display: flex; align-items: center; justify-content: center;
           transition: all 0.18s ease; position: relative; overflow: hidden;
         }
-        .md-icon-btn svg { width: 20px; height: 20px; fill: rgba(255,255,255,0.70); transition: fill 0.18s ease; }
+        .md-icon-btn svg { width: 16px; height: 16px; fill: rgba(255,255,255,0.70); transition: fill 0.18s ease; }
         .md-icon-btn:active, .md-icon-btn.pressed { background: rgba(255,255,255,0.14); transform: scale(0.93); }
         /* Active (shuffle on / repeat on) — accent tint with matching border */
         .md-icon-btn.active svg { fill: var(--accent); }
