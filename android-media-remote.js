@@ -143,6 +143,14 @@ class AndroidMediaRemote extends HTMLElement {
     r.getElementById('remoteOverlay').classList.remove('hidden');
     r.getElementById('albumImg').classList.add('hidden');
     r.getElementById('mainPlaceholder').classList.add('hidden');
+
+    /* Show a notice if no remote.* entity is available for this device */
+    const hasRem = this._remoteEntityId && !!this._hass?.states[this._remoteEntityId];
+    r.getElementById('rNoRemoteNotice')?.classList.toggle('visible', !hasRem);
+    /* Dim chip buttons that need a remote entity */
+    ['rBack','rHome','rAssistant'].forEach(id => {
+      r.getElementById(id)?.classList.toggle('remote-unavailable', !hasRem);
+    });
   }
 
   _closeRemote() {
@@ -273,25 +281,35 @@ class AndroidMediaRemote extends HTMLElement {
     const keycode  = AndroidMediaRemote._keycodeNames[command];
     const adbCode  = AndroidMediaRemote._adbKeycodes[command];
 
+    /* Tier 3 equivalents for commands that map to media_player services */
+    const mediaTier3 = {
+      play:       () => this.call('media_play'),
+      pause:      () => this.call('media_pause'),
+      play_pause: () => this.call('media_play_pause'),
+      stop:       () => this.call('media_stop'),
+      next:       () => this.call('media_next_track'),
+      prev:       () => this.call('media_previous_track'),
+    };
+
+    const tryAdb = () => {
+      if (adbCode !== undefined) {
+        this._hass.callService('androidtv', 'adb_command', {
+          entity_id: this._entity, command: `input keyevent ${adbCode}`
+        }).catch(() => { mediaTier3[command]?.(); });
+      } else {
+        mediaTier3[command]?.();
+      }
+    };
+
     if (hasRem && keycode) {
       /* Tier 1: androidtv_remote — preferred */
       this._hass.callService('remote', 'send_command', {
         entity_id: remId, command: keycode
-      }).catch(() => {
-        /* Tier 2: ADB fallback */
-        if (adbCode !== undefined) {
-          this._hass.callService('androidtv', 'adb_command', {
-            entity_id: this._entity, command: `input keyevent ${adbCode}`
-          }).catch(() => {});
-        }
-      });
-    } else if (adbCode !== undefined) {
-      /* Tier 2 direct: no remote entity, try ADB */
-      this._hass.callService('androidtv', 'adb_command', {
-        entity_id: this._entity, command: `input keyevent ${adbCode}`
-      }).catch(() => {});
+      }).catch(() => tryAdb());
+    } else {
+      /* No remote entity — try ADB then media_player */
+      tryAdb();
     }
-    /* Tier 3 handled by callers for media_player services */
   }
 
   /* Volume via remote keycodes — for androidtv_remote and ADB */
@@ -559,6 +577,23 @@ class AndroidMediaRemote extends HTMLElement {
         .r-assistant-btn.pressed { background: rgba(66,133,244,0.22) !important; }
         .r-assistant-btn:active svg,
         .r-assistant-btn.pressed svg { fill: #4285F4; }
+
+        /* No-remote notice — shown when no remote.* entity is available */
+        .r-no-remote-notice {
+          display: none; width: 100%;
+          background: rgba(255,193,7,0.10);
+          border: 1px solid rgba(255,193,7,0.22);
+          border-radius: 8px;
+          padding: 8px 12px;
+          font-size: 11.5px; line-height: 1.5;
+          color: rgba(255,220,100,0.90);
+          text-align: center;
+        }
+        .r-no-remote-notice.visible { display: block; }
+        /* When notice is visible, dim the d-pad via sibling combinator */
+        .r-no-remote-notice.visible ~ .clickpad-wrap { opacity: 0.22; pointer-events: none; }
+        /* Disabled chip buttons (back, home, mic) when no remote entity */
+        .r-chip-btn.remote-unavailable { opacity: 0.30; pointer-events: none; }
 
         /* Apps — open state */
         .r-apps-btn.r-apps-open { background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.26) !important; }
@@ -852,13 +887,13 @@ class AndroidMediaRemote extends HTMLElement {
 
               <!-- SINGLE TOP ROW: Back · Home · Mic · Apps · Power -->
               <div class="r-top-row">
-                <button class="r-chip-btn" id="rBack">
+                <button class="r-chip-btn needs-remote" id="rBack">
                   <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>Back
                 </button>
-                <button class="r-chip-btn" id="rHome">
+                <button class="r-chip-btn needs-remote" id="rHome">
                   <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>Home
                 </button>
-                <button class="r-chip-btn r-assistant-btn" id="rAssistant">
+                <button class="r-chip-btn r-assistant-btn needs-remote" id="rAssistant">
                   <svg viewBox="0 0 24 24"><path d="M12 15c1.66 0 2.99-1.34 2.99-3L15 6c0-1.66-1.34-3-3-3S9 4.34 9 6v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 15 6.7 12H5c0 3.42 2.72 6.23 6 6.72V22h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>Mic
                 </button>
                 <button class="r-chip-btn r-apps-btn" id="rApps">
@@ -871,6 +906,12 @@ class AndroidMediaRemote extends HTMLElement {
 
               <!-- Apps dropdown — positioned just below single header row -->
               <div class="r-apps-dropdown hidden" id="rAppsDropdown"></div>
+
+              <!-- No-remote notice — shown when no remote.* entity exists -->
+              <div class="r-no-remote-notice" id="rNoRemoteNotice">
+                D-pad and navigation require the <strong>Android TV Remote</strong> integration.<br>
+                Power, Apps and media controls still work.
+              </div>
 
               <!-- D-Pad — fills all remaining vertical space -->
               <div class="clickpad-wrap">
