@@ -56,7 +56,10 @@ class AndroidMediaRemote extends HTMLElement {
       remote_entity: '',
       ...config
     };
-    if (!this._entity) this._entity = this._config.entities[0];
+    if (!this._entity || !this._config.entities.includes(this._entity)) {
+      this._entity = this._config.entities[0];
+      this._lastMeta = { title: null, artist: null, source: null };
+    }
     if (prevStartup !== undefined && prevStartup !== this._config.startup_mode && this.shadowRoot.innerHTML) {
       this._applyStartupMode();
     }
@@ -85,8 +88,9 @@ class AndroidMediaRemote extends HTMLElement {
 
     if (this._config.auto_switch) {
       const active = this._config.entities.find(e => hass.states[e]?.state === 'playing');
-      if (active && (this._entity !== active || !this._manualSelection)) {
-        if (this._entity !== active) { this._entity = active; this._manualSelection = false; }
+      if (active && this._entity !== active && !this._manualSelection) {
+        this._entity = active;
+        this._lastMeta = { title: null, artist: null, source: null };
       }
     }
 
@@ -105,14 +109,19 @@ class AndroidMediaRemote extends HTMLElement {
   }
 
   disconnectedCallback() {
-    if (this._timer)        clearInterval(this._timer);
-    if (this._androidPulse) clearInterval(this._androidPulse);
+    if (this._timer)        { clearInterval(this._timer);        this._timer        = null; }
+    if (this._androidPulse) { clearInterval(this._androidPulse); this._androidPulse = null; }
   }
 
   getDeviceIcon(stateObj) {
-    const name = (stateObj?.attributes?.friendly_name || '').toLowerCase();
-    if (name.includes('tv'))
+    const name  = (stateObj?.attributes?.friendly_name || '').toLowerCase();
+    const model = (stateObj?.attributes?.device_class  || '').toLowerCase();
+    const isTv   = name.includes('tv') || name.includes('shield') || name.includes('fire') || model.includes('tv');
+    const isCast = name.includes('cast') || name.includes('chromecast') || name.includes('nest') || name.includes('hub');
+    if (isTv)
       return `<svg viewBox="0 0 24 24" width="120" height="120" fill="rgba(255,255,255,0.3)"><path d="M21,3H3C1.89,3 1,3.89 1,5V17A2,2 0 0,0 3,19H8V21H16V19H21A2,2 0 0,0 23,17V5C23,3.89 22.1,3 21,3M21,17H3V5H21V17Z"/></svg>`;
+    if (isCast)
+      return `<svg viewBox="0 0 24 24" width="120" height="120" fill="rgba(255,255,255,0.3)"><path d="M1,18 L1,21 L4,21 C4,19.34 2.66,18 1,18 M1,14 L1,16 C3.76,16 6,18.24 6,21 L8,21 C8,17.13 4.87,14 1,14 M1,10 L1,12 C6,12 10,16 10,21 L12,21 C12,14.92 7.07,10 1,10 M21,3 L3,3 C1.9,3 1,3.9 1,5 L1,8 L3,8 L3,5 L21,5 L21,19 L14,19 L14,21 L21,21 C22.1,21 23,20.1 23,19 L23,5 C23,3.9 22.1,3 21,3Z"/></svg>`;
     return `<svg viewBox="0 0 24 24" width="120" height="120" fill="rgba(255,255,255,0.3)"><path d="M12,3V13.55C11.41,13.21 10.73,13 10,13C7.79,13 6,14.79 6,17C6,19.21 7.79,21 10,21C12.21,21 14,19.21 14,17V7H18V3H12Z"/></svg>`;
   }
 
@@ -312,62 +321,64 @@ class AndroidMediaRemote extends HTMLElement {
     }
   }
 
-  /* Volume via remote keycodes — for androidtv_remote and ADB */
+  /* Volume via remote keycodes → ADB → media_player.volume_set */
   _sendVolumeCommand(direction) {
     const cmd    = direction > 0 ? 'volume_up' : 'volume_down';
     const remId  = this._remoteEntityId;
     const hasRem = remId && !!this._hass.states[remId];
     const volEnt = this._volEntity;
+    const adbCode = AndroidMediaRemote._adbKeycodes[cmd];
 
-    if (hasRem) {
-      /* Remote keycode first — works for both androidtv_remote and ADB-via-remote */
-      const keycode = AndroidMediaRemote._keycodeNames[cmd];
-      this._hass.callService('remote', 'send_command', {
-        entity_id: remId, command: keycode
-      }).catch(() => {
-        /* ADB fallback */
-        const adbCode = AndroidMediaRemote._adbKeycodes[cmd];
-        this._hass.callService('androidtv', 'adb_command', {
-          entity_id: this._entity, command: `input keyevent ${adbCode}`
-        }).catch(() => {
-          /* media_player last resort */
-          const current = this._hass.states[volEnt]?.attributes?.volume_level || 0;
-          this._hass.callService('media_player', 'volume_set', {
-            entity_id: volEnt, volume_level: Math.min(1, Math.max(0, current + direction * 0.05))
-          });
-        });
-      });
-    } else {
-      /* No remote entity — media_player.volume_set */
+    const volSet = () => {
       const current = this._hass.states[volEnt]?.attributes?.volume_level || 0;
       this._hass.callService('media_player', 'volume_set', {
         entity_id: volEnt, volume_level: Math.min(1, Math.max(0, current + direction * 0.05))
       });
+    };
+
+    if (hasRem) {
+      /* Tier 1: remote keycode */
+      const keycode = AndroidMediaRemote._keycodeNames[cmd];
+      this._hass.callService('remote', 'send_command', {
+        entity_id: remId, command: keycode
+      }).catch(() => {
+        /* Tier 2: ADB */
+        this._hass.callService('androidtv', 'adb_command', {
+          entity_id: this._entity, command: `input keyevent ${adbCode}`
+        }).catch(() => volSet());
+      });
+    } else {
+      /* No remote entity — try ADB first (works for androidtv/fire_tv), fall back to volume_set (works for Cast) */
+      this._hass.callService('androidtv', 'adb_command', {
+        entity_id: this._entity, command: `input keyevent ${adbCode}`
+      }).catch(() => volSet());
     }
   }
 
-  /* Mute via KEYCODE_VOLUME_MUTE → ADB → media_player.volume_mute */
+  /* Mute via KEYCODE_VOLUME_MUTE → ADB keyevent 164 → media_player.volume_mute */
   _sendMuteCommand() {
     const remId  = this._remoteEntityId;
     const hasRem = remId && !!this._hass.states[remId];
+    const muteSet = () => {
+      const muted = this._hass.states[this._entity]?.attributes?.is_volume_muted;
+      this._hass.callService('media_player', 'volume_mute', {
+        entity_id: this._volEntity, is_volume_muted: !muted
+      });
+    };
+
     if (hasRem) {
       this._hass.callService('remote', 'send_command', {
         entity_id: remId, command: 'KEYCODE_VOLUME_MUTE'
       }).catch(() => {
         this._hass.callService('androidtv', 'adb_command', {
           entity_id: this._entity, command: 'input keyevent 164'
-        }).catch(() => {
-          const muted = this._hass.states[this._entity]?.attributes?.is_volume_muted;
-          this._hass.callService('media_player', 'volume_mute', {
-            entity_id: this._volEntity, is_volume_muted: !muted
-          });
-        });
+        }).catch(() => muteSet());
       });
     } else {
-      const muted = this._hass.states[this._entity]?.attributes?.is_volume_muted;
-      this._hass.callService('media_player', 'volume_mute', {
-        entity_id: this._volEntity, is_volume_muted: !muted
-      });
+      /* No remote entity — try ADB first (androidtv/fire_tv), fall back to volume_mute (Cast) */
+      this._hass.callService('androidtv', 'adb_command', {
+        entity_id: this._entity, command: 'input keyevent 164'
+      }).catch(() => muteSet());
     }
   }
 
@@ -421,15 +432,20 @@ class AndroidMediaRemote extends HTMLElement {
   }
 
   _openMoreInfo() {
-    const ev = new Event('hass-more-info', { bubbles: true, composed: true });
-    ev.detail = { entityId: this._entity };
-    this.dispatchEvent(ev);
+    this.dispatchEvent(new CustomEvent('hass-more-info', {
+      bubbles: true, composed: true,
+      detail: { entityId: this._entity }
+    }));
   }
 
   formatTime(s) {
-    if (!s || isNaN(s)) return '0:00';
-    const m = Math.floor(s / 60), rs = Math.floor(s % 60);
-    return `${m}:${rs < 10 ? '0' : ''}${rs}`;
+    if (!s || isNaN(s) || s < 0) return '0:00';
+    const h  = Math.floor(s / 3600);
+    const m  = Math.floor((s % 3600) / 60);
+    const rs = Math.floor(s % 60);
+    const mm = h > 0 ? String(m).padStart(2, '0') : m;
+    const ss = String(rs).padStart(2, '0');
+    return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
   }
 
   /* ══════════════════════════════════════════════════════════
@@ -751,10 +767,6 @@ class AndroidMediaRemote extends HTMLElement {
         /* Active (shuffle on / repeat on) — accent tint with matching border */
         .md-icon-btn.active svg { fill: var(--accent); }
         .md-icon-btn.active { background: rgba(66,133,244,0.12); border-color: rgba(66,133,244,0.28) !important; }
-        .md-icon-btn:active, .md-icon-btn.pressed { background: rgba(255,255,255,0.14); transform: scale(0.93); }
-        /* Active (shuffle on / repeat on) — accent tint with matching border */
-        .md-icon-btn.active svg { fill: var(--accent); }
-        .md-icon-btn.active { background: rgba(66,133,244,0.12); border-color: rgba(66,133,244,0.28) !important; }
 
         /* Mini remote — compact only, replaces shuffle slot */
         .mini-remote-btn {
@@ -776,7 +788,7 @@ class AndroidMediaRemote extends HTMLElement {
           background: rgba(255,255,255,0.06);
           border: 1px solid rgba(255,255,255,0.10) !important;
           cursor: pointer; align-items: center; justify-content: center;
-          flex-shrink: 0; transition: all 0.18s ease;
+          transition: all 0.18s ease;
           position: relative; overflow: hidden;
         }
         .compact-mute-btn svg { width: 19px; height: 19px; fill: rgba(255,255,255,0.82); transition: fill 0.18s ease; }
@@ -823,11 +835,10 @@ class AndroidMediaRemote extends HTMLElement {
           font-family: 'Google Sans', Roboto, sans-serif;
         }
         .selector.hidden { display: none !important; }
-        .selector-hidden .content { padding-bottom: 12px; }
 
         .hidden { display: none !important; }
         .hide-selector .selector { display: none !important; }
-        .hide-selector .content  { padding-bottom: 8px; }
+        .hide-selector .content  { padding-bottom: 12px; }
 
         /* ─── Compact overrides ───────────────────────────── */
         .mode-compact .art-wrapper    { display: none; }
@@ -1033,10 +1044,12 @@ class AndroidMediaRemote extends HTMLElement {
     r.getElementById('btnNext').onclick    = () => this.call('media_next_track');
     r.getElementById('btnShuffle').onclick = () => {
       const state = this._hass.states[this._entity];
+      if (!state) return;
       this.call('shuffle_set', { shuffle: !state.attributes.shuffle });
     };
     r.getElementById('btnRepeat').onclick  = () => {
       const state = this._hass.states[this._entity];
+      if (!state) return;
       const next  = state.attributes.repeat === 'all' ? 'one' : state.attributes.repeat === 'one' ? 'off' : 'all';
       this.call('repeat_set', { repeat: next });
     };
@@ -1074,7 +1087,12 @@ class AndroidMediaRemote extends HTMLElement {
             }).catch(() => {
               this._hass.callService('androidtv', 'adb_command', {
                 entity_id: this._entity, command: `input keyevent ${adbCode}`
-              }).catch(() => {});
+              }).catch(() => {
+                /* Tier 3: direct volume_set for any platform that supports it */
+                this._hass.callService('media_player', 'volume_set', {
+                  entity_id: volEnt, volume_level: newLevel
+                });
+              });
             });
           };
           if (!this._volLastFired || (now - this._volLastFired) >= 380) {
@@ -1140,17 +1158,20 @@ class AndroidMediaRemote extends HTMLElement {
         || [];
       const current = state?.attributes?.source || state?.attributes?.app_name || '';
 
+      /* Escape HTML special characters to prevent injection from source names */
+      const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
       let html = '';
       if (sources.length) {
         html = sources.map(src => `
-            <div class="r-app-item ${src === current ? 'r-app-active' : ''}" data-src="${src}">
-              <svg viewBox="0 0 24 24"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>${src}
+            <div class="r-app-item ${src === current ? 'r-app-active' : ''}" data-src="${esc(src)}">
+              <svg viewBox="0 0 24 24"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>${esc(src)}
             </div>`).join('');
       } else if (current) {
         /* No source list configured but we know the current app — show it as read-only */
         html = `
           <div class="r-app-item r-app-active" style="cursor:default;">
-            <svg viewBox="0 0 24 24"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>${current}
+            <svg viewBox="0 0 24 24"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>${esc(current)}
           </div>
           <div class="r-app-item" style="color:rgba(255,255,255,0.30);cursor:default;font-size:12px;padding:8px 16px;">
             To add shortcuts, configure source_list in your Cast or Android TV integration.
@@ -1203,17 +1224,18 @@ class AndroidMediaRemote extends HTMLElement {
     if (freshTitle) this._lastMeta.title = freshTitle;
     const displayTitle = this._lastMeta.title || (isPlaying ? 'Playing' : 'Idle');
 
-    /* Rich artist fallback: media_artist → media_album_name → cached → friendly_name */
+    /* Rich artist fallback: media_artist → media_album_name → cached → friendly_name (idle only) */
     const freshArtist = state.attributes.media_artist
       || state.attributes.media_album_name;
     if (freshArtist) this._lastMeta.artist = freshArtist;
-    /* Only fall back to friendly_name when nothing better has ever been cached */
+    /* When playing, never fall back to friendly_name — show blank rather than device name */
     const displayArtist = this._lastMeta.artist
-      || (isPlaying ? null : state.attributes.friendly_name)
-      || state.attributes.friendly_name || '';
+      || (isPlaying ? '' : (state.attributes.friendly_name || ''));
 
-    /* Clear cache when not playing at all */
-    if (!isPlaying) this._lastMeta = { title: null, artist: null, source: currentSource };
+    /* Clear cache only when playback has fully stopped — not on pause */
+    if (['idle','off','standby','unavailable'].includes(state.state)) {
+      this._lastMeta = { title: null, artist: null, source: currentSource };
+    }
 
     const titleEl  = r.getElementById('tTitle');
     const artistEl = r.getElementById('tArtist');
@@ -1223,8 +1245,7 @@ class AndroidMediaRemote extends HTMLElement {
     artistEl.style.color = this._config.artist_color || 'rgba(255,255,255,0.65)';
 
     const cardOuter = r.getElementById('cardOuter');
-    cardOuter.classList.toggle('vol-btn-mode',    this._config.volume_control === 'buttons');
-    cardOuter.classList.toggle('hide-selector',   this._config.show_entity_selector === false);
+    cardOuter.classList.toggle('vol-btn-mode', this._config.volume_control === 'buttons');
 
     /* Shuffle / repeat */
     r.getElementById('btnShuffle').classList.toggle('active', isPlaying && state.attributes.shuffle === true);
@@ -1297,12 +1318,12 @@ class AndroidMediaRemote extends HTMLElement {
     const sel = r.getElementById('eSelector');
     if (sel) {
       const show = this._config.show_entity_selector !== false;
-      sel.classList.toggle('hidden', !show);
-      cardOuter.classList.toggle('selector-hidden', !show);
+      cardOuter.classList.toggle('hide-selector', !show);
       if (show) {
         sel.innerHTML = (this._config.entities || []).map(ent => {
           const s = this._hass.states[ent];
-          return `<option value="${ent}" ${ent === this._entity ? 'selected' : ''}>${s?.attributes?.friendly_name || ent}</option>`;
+          const name = (s?.attributes?.friendly_name || ent).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          return `<option value="${ent}" ${ent === this._entity ? 'selected' : ''}>${name}</option>`;
         }).join('');
       }
     }
