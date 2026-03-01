@@ -675,15 +675,16 @@ class AndroidMediaRemote extends HTMLElement {
 
         /* FAB — large, primary action */
         .md-fab {
-          width: 72px; height: 72px; border-radius: 50% !important;
+          width: 56px; height: 56px; aspect-ratio: 1; flex-shrink: 0;
+          border-radius: 50% !important;
           background: var(--accent);
           box-shadow: 0 4px 12px rgba(66,133,244,0.45), 0 1px 3px rgba(0,0,0,0.4);
           border: none !important; cursor: pointer;
           display: flex; align-items: center; justify-content: center;
           transition: all 0.18s cubic-bezier(0.4,0,0.2,1);
-          position: relative; overflow: hidden; flex-shrink: 0;
+          position: relative; overflow: hidden;
         }
-        .md-fab svg { width: 26px; height: 26px; fill: #fff; }
+        .md-fab svg { width: 24px; height: 24px; fill: #fff; }
         .md-fab::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: rgba(255,255,255,0); transition: background 0.18s ease; }
         .md-fab:active::after,
         .md-fab.pressed::after { background: rgba(255,255,255,0.14); }
@@ -691,24 +692,30 @@ class AndroidMediaRemote extends HTMLElement {
 
         /* Outlined nav buttons — medium, prev/next */
         .md-nav-btn {
-          width: 56px; height: 56px; border-radius: 50% !important;
+          width: 44px; height: 44px; aspect-ratio: 1; flex-shrink: 0;
+          border-radius: 50% !important;
           background: rgba(255,255,255,0.06);
           border: 1px solid rgba(255,255,255,0.10) !important;
           cursor: pointer; display: flex; align-items: center; justify-content: center;
           transition: all 0.18s ease; position: relative; overflow: hidden;
         }
-        .md-nav-btn svg { width: 22px; height: 22px; fill: rgba(255,255,255,0.82); }
+        .md-nav-btn svg { width: 20px; height: 20px; fill: rgba(255,255,255,0.82); }
         .md-nav-btn:active, .md-nav-btn.pressed { background: rgba(255,255,255,0.14); transform: scale(0.93); }
 
         /* Ghost icon buttons — Shuffle / Repeat — smaller, secondary */
         .md-icon-btn {
-          width: 44px; height: 44px; border-radius: 50% !important;
+          width: 36px; height: 36px; aspect-ratio: 1; flex-shrink: 0;
+          border-radius: 50% !important;
           background: rgba(255,255,255,0.06);
           border: 1px solid rgba(255,255,255,0.10) !important;
           cursor: pointer; display: flex; align-items: center; justify-content: center;
           transition: all 0.18s ease; position: relative; overflow: hidden;
         }
-        .md-icon-btn svg { width: 16px; height: 16px; fill: rgba(255,255,255,0.70); transition: fill 0.18s ease; }
+        .md-icon-btn svg { width: 15px; height: 15px; fill: rgba(255,255,255,0.70); transition: fill 0.18s ease; }
+        .md-icon-btn:active, .md-icon-btn.pressed { background: rgba(255,255,255,0.14); transform: scale(0.93); }
+        /* Active (shuffle on / repeat on) — accent tint with matching border */
+        .md-icon-btn.active svg { fill: var(--accent); }
+        .md-icon-btn.active { background: rgba(66,133,244,0.12); border-color: rgba(66,133,244,0.28) !important; }
         .md-icon-btn:active, .md-icon-btn.pressed { background: rgba(255,255,255,0.14); transform: scale(0.93); }
         /* Active (shuffle on / repeat on) — accent tint with matching border */
         .md-icon-btn.active svg { fill: var(--accent); }
@@ -729,7 +736,7 @@ class AndroidMediaRemote extends HTMLElement {
 
         /* Compact mute button — matches md-nav-btn: outlined circle, bright icon */
         .compact-mute-btn {
-          display: none; width: 36px; height: 36px;
+          display: none; width: 36px; height: 36px; aspect-ratio: 1; flex-shrink: 0;
           border-radius: 50% !important;
           background: rgba(255,255,255,0.06);
           border: 1px solid rgba(255,255,255,0.10) !important;
@@ -749,10 +756,11 @@ class AndroidMediaRemote extends HTMLElement {
         /* Volume +/− buttons */
         .vol-btn {
           display: none; cursor: pointer; align-items: center; justify-content: center;
-          width: 48px; height: 48px; border-radius: 50% !important;
+          width: 44px; height: 44px; aspect-ratio: 1; flex-shrink: 0;
+          border-radius: 50% !important;
           background: rgba(255,255,255,0.06);
           border: 1px solid rgba(255,255,255,0.10) !important;
-          flex-shrink: 0; transition: all 0.18s ease;
+          transition: all 0.18s ease;
           padding: 0; position: relative; overflow: hidden;
         }
         .vol-btn svg { width: 22px; height: 22px; fill: rgba(255,255,255,0.82); }
