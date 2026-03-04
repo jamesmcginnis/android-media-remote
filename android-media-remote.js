@@ -157,7 +157,7 @@ class AndroidMediaRemote extends HTMLElement {
     const hasRem = this._remoteEntityId && !!this._hass?.states[this._remoteEntityId];
     r.getElementById('rNoRemoteNotice')?.classList.toggle('visible', !hasRem);
     /* Dim chip buttons that need a remote entity */
-    ['rBack','rHome','rAssistant'].forEach(id => {
+    ['rBack','rHome'].forEach(id => {
       r.getElementById(id)?.classList.toggle('remote-unavailable', !hasRem);
     });
   }
@@ -559,8 +559,8 @@ class AndroidMediaRemote extends HTMLElement {
         }
 
         /*
-         * SINGLE TOP ROW: Back · Home · Mic · Apps · Power
-         * All 5 chips in one flex row, compact padding so they all fit.
+         * SINGLE TOP ROW: Back · Home · Apps · Power
+         * All 4 chips in one flex row, compact padding so they all fit.
          */
         .r-top-row {
           display: flex; width: 100%; align-items: center; gap: 6px;
@@ -586,13 +586,6 @@ class AndroidMediaRemote extends HTMLElement {
         .r-power-btn.r-power-on svg { fill: rgba(239,83,80,1); }
         .r-power-btn.r-power-on:active,
         .r-power-btn.r-power-on.pressed { background: rgba(234,67,53,0.27) !important; }
-
-        /* Mic (Assistant) — icon has a subtle blue hint but NO background tint by default */
-        .r-assistant-btn svg { fill: rgba(130,170,255,0.75); }
-        .r-assistant-btn:active,
-        .r-assistant-btn.pressed { background: rgba(66,133,244,0.22) !important; }
-        .r-assistant-btn:active svg,
-        .r-assistant-btn.pressed svg { fill: #4285F4; }
 
         /* No-remote notice — shown when no remote.* entity is available */
         .r-no-remote-notice {
@@ -896,16 +889,13 @@ class AndroidMediaRemote extends HTMLElement {
           <div class="remote-overlay hidden" id="remoteOverlay">
             <div class="remote-panel">
 
-              <!-- SINGLE TOP ROW: Back · Home · Mic · Apps · Power -->
+              <!-- SINGLE TOP ROW: Back · Home · Apps · Power -->
               <div class="r-top-row">
                 <button class="r-chip-btn needs-remote" id="rBack">
                   <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>Back
                 </button>
                 <button class="r-chip-btn needs-remote" id="rHome">
                   <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>Home
-                </button>
-                <button class="r-chip-btn r-assistant-btn needs-remote" id="rAssistant">
-                  <svg viewBox="0 0 24 24"><path d="M12 15c1.66 0 2.99-1.34 2.99-3L15 6c0-1.66-1.34-3-3-3S9 4.34 9 6v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 15 6.7 12H5c0 3.42 2.72 6.23 6 6.72V22h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>Mic
                 </button>
                 <button class="r-chip-btn r-apps-btn" id="rApps">
                   <svg viewBox="0 0 24 24"><path d="M4,8H8V4H4M10,20H14V16H10M4,20H8V16H4M4,14H8V10H4M10,14H14V10H10M16,4V8H20V4M10,8H14V4H10M16,14H20V10H16M16,20H20V16H16Z"/></svg>Apps
@@ -1138,7 +1128,6 @@ class AndroidMediaRemote extends HTMLElement {
     };
     rCmd('rBack',      () => this._sendCommand('back'));
     rCmd('rHome',      () => this._sendCommand('home'));
-    rCmd('rAssistant', () => this._sendCommand('assistant'));
     rCmd('rUp',        () => this._sendCommand('up'));
     rCmd('rDown',      () => this._sendCommand('down'));
     rCmd('rLeft',      () => this._sendCommand('left'));
@@ -1163,8 +1152,8 @@ class AndroidMediaRemote extends HTMLElement {
 
       let html = '';
       if (sources.length) {
-        html = sources.map(src => `
-            <div class="r-app-item ${src === current ? 'r-app-active' : ''}" data-src="${esc(src)}">
+        html = sources.map((src, i) => `
+            <div class="r-app-item ${src === current ? 'r-app-active' : ''}" data-idx="${i}">
               <svg viewBox="0 0 24 24"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>${esc(src)}
             </div>`).join('');
       } else if (current) {
@@ -1180,8 +1169,11 @@ class AndroidMediaRemote extends HTMLElement {
         html = `<div class="r-app-item" style="color:rgba(255,255,255,0.35);cursor:default;">No apps available</div>`;
       }
       rAppsDropdown.innerHTML = html;
-      rAppsDropdown.querySelectorAll('.r-app-item[data-src]').forEach(item => {
-        item.onclick = (e) => { e.stopPropagation(); this.call('select_source', { source: item.dataset.src }); closeApps(); };
+      /* Use data-idx to look up the original source string from the sources array,
+         avoiding any HTML-encoding round-trip that would corrupt special characters. */
+      rAppsDropdown.querySelectorAll('.r-app-item[data-idx]').forEach(item => {
+        const src = sources[parseInt(item.dataset.idx, 10)];
+        item.onclick = (e) => { e.stopPropagation(); this.call('select_source', { source: src }); closeApps(); };
       });
       rAppsDropdown.classList.remove('hidden');
       rAppsBtn.classList.add('r-apps-open');
