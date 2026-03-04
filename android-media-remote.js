@@ -88,6 +88,11 @@ class AndroidMediaRemote extends HTMLElement {
 
     if (this._config.auto_switch) {
       const active = this._config.entities.find(e => hass.states[e]?.state === 'playing');
+      /* Clear the manual-selection lock once the manually-chosen entity is no longer playing,
+         so auto-switch can resume for future playback events. */
+      if (this._manualSelection && hass.states[this._entity]?.state !== 'playing') {
+        this._manualSelection = false;
+      }
       if (active && this._entity !== active && !this._manualSelection) {
         this._entity = active;
         this._lastMeta = { title: null, artist: null, source: null };
@@ -1055,8 +1060,12 @@ class AndroidMediaRemote extends HTMLElement {
     addPress(r.getElementById('btnVolUp'));
     addPress(r.getElementById('btnVolDown'));
 
-    /* Volume slider */
-    r.getElementById('vSlider').oninput = (e) => {
+    /* Volume slider — lock out HA state updates while the user is actively dragging */
+    const vSlider = r.getElementById('vSlider');
+    vSlider.addEventListener('pointerdown', () => { this._sliderDragging = true; });
+    vSlider.addEventListener('pointerup',   () => { this._sliderDragging = false; });
+    vSlider.addEventListener('pointercancel', () => { this._sliderDragging = false; });
+    vSlider.oninput = (e) => {
       const newLevel = parseFloat(e.target.value) / 100;
       const volEnt   = this._volEntity;
       const remId    = this._remoteEntityId;
@@ -1116,8 +1125,14 @@ class AndroidMediaRemote extends HTMLElement {
       this.updateContent(this._hass.states[this._entity]);
     };
 
-    /* Progress seek */
-    r.getElementById('progWrap').onclick = (e) => this.doSeek(e);
+    /* Progress seek — mouse click and touch */
+    const progWrap = r.getElementById('progWrap');
+    progWrap.addEventListener('click', (e) => this.doSeek(e));
+    progWrap.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      const touch = e.changedTouches[0];
+      this.doSeek(touch);
+    }, { passive: false });
 
     /* Remote D-pad / chips */
     const rCmd = (id, fn) => {
@@ -1299,9 +1314,11 @@ class AndroidMediaRemote extends HTMLElement {
       }
     }
 
-    /* Volume slider */
-    const volState = this._hass?.states[this._volEntity];
-    r.getElementById('vSlider').value = ((volState?.attributes?.volume_level ?? state.attributes.volume_level ?? 0) * 100);
+    /* Volume slider — only update if the user is not currently dragging */
+    if (!this._sliderDragging) {
+      const volState = this._hass?.states[this._volEntity];
+      r.getElementById('vSlider').value = ((volState?.attributes?.volume_level ?? state.attributes.volume_level ?? 0) * 100);
+    }
 
     /* Progress */
     r.getElementById('pTot').textContent = this.formatTime(state.attributes.media_duration || 0);
@@ -1336,12 +1353,13 @@ class AndroidMediaRemoteEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (!this._initialized) this.render();
+    if (!this._initialized) this.render(); /* retry whether first call or a previous attempt bailed */
   }
 
   setConfig(config) {
     this._config = config;
     if (this._initialized) this.updateUI();
+    else this.render(); /* retry in case hass arrived first but _config was missing */
   }
 
   updateUI() {
@@ -1363,7 +1381,7 @@ class AndroidMediaRemoteEditor extends HTMLElement {
 
   render() {
     if (!this._hass || !this._config) return;
-    this._initialized = true;
+    this._initialized = true;  /* set after guard so a premature call doesn't lock out a retry */
     const selected   = this._config.entities || [];
     const others     = Object.keys(this._hass.states)
       .filter(e => e.startsWith('media_player.') && !selected.includes(e)).sort();
